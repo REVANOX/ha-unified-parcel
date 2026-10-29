@@ -116,12 +116,12 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _fetch_imap_emails(self) -> None:
         """Liest ungelesene Mails für Otto, DPD, Hermes, UPS und FedEx aus."""
-        server = self.entry_data[CONF_IMAP_SERVER]
-        port = self.entry_data[CONF_IMAP_PORT]
-        ssl = self.entry_data[CONF_IMAP_SSL]
-        user_email = self.entry_data[CONF_EMAIL]
-        password = self.entry_data[CONF_PASSWORD]
-        folder = self.options.get(CONF_FOLDER, self.entry_data.get(CONF_FOLDER, DEFAULT_FOLDER))
+        server = str(self.entry_data[CONF_IMAP_SERVER]).strip()
+        port = int(self.entry_data[CONF_IMAP_PORT])
+        ssl = bool(self.entry_data[CONF_IMAP_SSL])
+        user_email = str(self.entry_data[CONF_EMAIL]).strip()
+        password = str(self.entry_data[CONF_PASSWORD]).strip().replace(" ", "")
+        folder = str(self.options.get(CONF_FOLDER, self.entry_data.get(CONF_FOLDER, DEFAULT_FOLDER))).strip() or DEFAULT_FOLDER
 
         client = aioimaplib.IMAP4_SSL(host=server, port=port) if ssl else aioimaplib.IMAP4(host=server, port=port)
         await client.wait_hello_from_server()
@@ -130,7 +130,9 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if login_res.result != "OK":
                 raise UpdateFailed("IMAP-Anmeldung fehlgeschlagen")
 
-            await client.select(folder)
+            select_res = await client.select(folder)
+            if select_res.result != "OK":
+                await client.select("INBOX")
             # Suche nach ungelesenen Nachrichten
             search_res = await client.search("UNSEEN UNDELETED")
             if search_res.result != "OK" or not search_res.lines:

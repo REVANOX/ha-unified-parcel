@@ -34,12 +34,12 @@ _LOGGER = logging.getLogger(__name__)
 
 async def validate_imap(data: dict[str, Any]) -> None:
     """IMAP-Verbindung testen und Zugangsdaten prüfen."""
-    server = data[CONF_IMAP_SERVER]
-    port = data[CONF_IMAP_PORT]
-    ssl = data[CONF_IMAP_SSL]
-    email = data[CONF_EMAIL]
-    password = data[CONF_PASSWORD]
-    folder = data.get(CONF_FOLDER, DEFAULT_FOLDER)
+    server = str(data[CONF_IMAP_SERVER]).strip()
+    port = int(data[CONF_IMAP_PORT])
+    ssl = bool(data[CONF_IMAP_SSL])
+    email = str(data[CONF_EMAIL]).strip()
+    password = str(data[CONF_PASSWORD]).strip().replace(" ", "")
+    folder = str(data.get(CONF_FOLDER, DEFAULT_FOLDER)).strip() or DEFAULT_FOLDER
 
     client = aioimaplib.IMAP4_SSL(host=server, port=port) if ssl else aioimaplib.IMAP4(host=server, port=port)
     try:
@@ -49,7 +49,10 @@ async def validate_imap(data: dict[str, Any]) -> None:
             raise aioimaplib.AioImapException("Login fehlgeschlagen")
         res = await client.select(folder)
         if res.result != "OK":
-            raise aioimaplib.AioImapException("Ordner nicht gefunden")
+            # Versuche INBOX falls ein benutzerdefinierter Ordner noch nicht existiert
+            res_inbox = await client.select("INBOX")
+            if res_inbox.result != "OK":
+                raise aioimaplib.AioImapException("Ordner nicht gefunden")
     finally:
         try:
             await client.logout()
@@ -69,8 +72,15 @@ class UnifiedParcelConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Daten bereinigen und typisieren (z.B. Port als Integer, Leerzeichen aus Passwort entfernen)
+            email_clean = str(user_input[CONF_EMAIL]).strip()
+            user_input[CONF_EMAIL] = email_clean
+            user_input[CONF_PASSWORD] = str(user_input[CONF_PASSWORD]).strip().replace(" ", "")
+            user_input[CONF_IMAP_SERVER] = str(user_input[CONF_IMAP_SERVER]).strip()
+            user_input[CONF_IMAP_PORT] = int(user_input[CONF_IMAP_PORT])
+
             # Einzigartigkeit über E-Mail-Adresse sicherstellen
-            await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
+            await self.async_set_unique_id(email_clean.lower())
             self._abort_if_unique_id_configured()
 
             try:
