@@ -3,7 +3,9 @@
 **(DHL, Amazon, DPD, Hermes, UPS, FedEx)**
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=REVANOX&repository=ha-unified-parcel&category=integration)
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=unified_parcel)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/REVANOX/ha-unified-parcel)
 [![Maintainer Wanted](https://img.shields.io/badge/maintainer-wanted-brightgreen.svg)](#-maintainer--mitwirken)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -153,9 +155,18 @@ title: 🟡 DHL Sendungen
 
 ---
 
-## 🚀 Installation via HACS
+## 🚀 Installation
 
-### 1. Als Custom Repository hinzufügen
+### ⚡ Option A: 1-Klick Installation via My Home Assistant (Empfohlen)
+
+Klicke einfach auf diesen Button, um das Repository direkt in deiner Home Assistant Instanz zu HACS hinzuzufügen:
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=REVANOX&repository=ha-unified-parcel&category=integration)
+
+---
+
+### 🛠️ Option B: Manuell zu HACS hinzufügen
+
 1. Öffne **Home Assistant** -> **HACS** -> **Integrationen**.
 2. Klicke oben rechts auf das Drei-Punkte-Menü (⋮) und wähle **Benutzerdefinierte Repositories** (*Custom repositories*).
 3. Füge die URL deines GitHub-Repositories ein:
@@ -163,11 +174,21 @@ title: 🟡 DHL Sendungen
    - **Kategorie**: `Integration`
 4. Klicke auf **Hinzufügen** (*Add*).
 
-### 2. Integration herunterladen & Home Assistant neu starten
-1. Suche nach **Unified Parcel Tracker** in HACS und klicke auf **Herunterladen**.
+---
+
+### 📦 Integration herunterladen & Home Assistant neu starten
+1. Suche in HACS nach **Unified Parcel Tracker** und klicke auf **Herunterladen** (*Download*).
 2. Starte Home Assistant neu (**Entwicklerwerkzeuge** -> **YAML** -> **Neu starten**).
 
-### 3. Integration einrichten (UI)
+---
+
+### ⚙️ Integration einrichten (UI Config Flow)
+
+Klicke direkt auf den Button, um den Einrichtungs-Assistenten in Home Assistant zu starten:
+
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=unified_parcel)
+
+*Oder manuell:*
 1. Gehe zu **Einstellungen** -> **Geräte & Dienste** -> **Integration hinzufügen**.
 2. Suche nach **Unified Parcel Tracker**.
 3. Gib deine Zugangsdaten ein:
@@ -175,6 +196,7 @@ title: 🟡 DHL Sendungen
    - **Port**: `993` (SSL aktiviert)
    - **E-Mail-Adresse**: Deine Paket-E-Mail-Adresse
    - **Passwort**: Dein E-Mail App-Passwort *(z.B. Google App-Passwort)*
+   - **Ordner**: `Pakete` *(oder `INBOX`)*
 
 ---
 
