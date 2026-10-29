@@ -1,0 +1,16 @@
+{
+  "domain": "unified_parcel",
+  "name": "Unified Parcel Tracker",
+  "codeowners": [
+    "@REVANOX"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/REVANOX/ha-unified-parcel",
+  "issue_tracker": "https://github.com/REVANOX/ha-unified-parcel/issues",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "version": "1.1.0",
+  "requirements": [
+    "aioimaplib>=1.0.1"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Unified Parcel Tracker einrichten",
+        "description": "Gib die Zugangsdaten für das E-Mail-Postfach ein, in dem deine Paketbenachrichtigungen (Otto, DPD, Hermes, UPS, FedEx etc.) ankommen.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "password": "Passwort / Google App-Passwort",
+          "imap_server": "IMAP-Server",
+          "imap_port": "Port",
+          "imap_ssl": "SSL-Verschlüsselung",
+          "folder": "Ordner (z. B. INBOX)",
+          "include_dhl": "Vorhandene DHL-Sensoren einbinden",
+          "include_amazon": "Vorhandene Amazon-Sensoren einbinden"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum IMAP-Server fehlgeschlagen. Bitte Server und Port prüfen.",
+      "invalid_auth": "Anmeldung fehlgeschlagen. Bitte E-Mail und App-Passwort überprüfen.",
+      "unknown": "Unerwarteter Fehler aufgetreten."
+    },
+    "abort": {
+      "already_configured": "Dieses E-Mail-Postfach ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Paket-Tracker Einstellungen anpassen",
+        "data": {
+          "folder": "Überwachter Postfach-Ordner",
+          "include_dhl": "DHL-Sensoren einbinden",
+          "include_amazon": "Amazon-Sensoren einbinden"
+        }
+      }
+    }
+  }
+}
