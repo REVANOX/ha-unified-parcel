@@ -32,6 +32,11 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=5)
 
+# Pakete die älter als X Tage sind und zugestellt wurden → automatisch entfernen
+DELIVERED_EXPIRY_DAYS = 3
+# Pakete die älter als X Tage sind (noch unterwegs) → automatisch entfernen
+ACTIVE_EXPIRY_DAYS = 30
+
 
 def decode_str(s: str | bytes | None) -> str:
     """Header-Text sauber dekodieren (z. B. UTF-8 oder ISO-8859)."""
@@ -79,14 +84,18 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.entry_data = entry_data
         self.options = options
+        # tracking_code -> {parcel_dict, "first_seen": datetime, "last_updated": datetime}
         self._email_parcels: dict[str, dict[str, Any]] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Ruft neue E-Mails ab und synchronisiert DHL / Amazon Sensoren."""
+        """Ruft neue E-Mails ab und synchronisiert alle Sensoren."""
         try:
             await self._fetch_imap_emails()
         except Exception as err:
             _LOGGER.warning("Fehler beim IMAP-Abruf (wird beim nächsten Intervall wiederholt): %s", err)
+
+        # Abgelaufene Pakete automatisch entfernen
+        self._cleanup_old_parcels()
 
         # Kombinieren und anreichern
         all_parcels = self._combine_all_parcels()
@@ -114,14 +123,34 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "total": len(all_parcels),
         }
 
+    def _cleanup_old_parcels(self) -> None:
+        """Entfernt abgelaufene Pakete automatisch aus dem Speicher."""
+        now = datetime.now()
+        to_remove = []
+        for tracking_code, entry in self._email_parcels.items():
+            parcel = entry.get("parcel", entry)  # Rückwärtskompatibilität
+            first_seen = entry.get("first_seen")
+            if not first_seen:
+                continue
+            age = now - first_seen
+            if parcel.get("isDelivered") or parcel.get("isPickup"):
+                if age.days >= DELIVERED_EXPIRY_DAYS:
+                    to_remove.append(tracking_code)
+                    _LOGGER.debug("Paket %s als zugestellt entfernt (älter als %d Tage)", tracking_code, DELIVERED_EXPIRY_DAYS)
+            elif age.days >= ACTIVE_EXPIRY_DAYS:
+                to_remove.append(tracking_code)
+                _LOGGER.debug("Paket %s entfernt (älter als %d Tage, noch unterwegs)", tracking_code, ACTIVE_EXPIRY_DAYS)
+        for code in to_remove:
+            del self._email_parcels[code]
+
     async def _fetch_imap_emails(self) -> None:
-        """Liest ungelesene Mails für Otto, DPD, Hermes, UPS und FedEx aus."""
-        server = self.entry_data[CONF_IMAP_SERVER]
-        port = self.entry_data[CONF_IMAP_PORT]
-        ssl = self.entry_data[CONF_IMAP_SSL]
-        user_email = self.entry_data[CONF_EMAIL]
-        password = self.entry_data[CONF_PASSWORD]
-        folder = self.options.get(CONF_FOLDER, self.entry_data.get(CONF_FOLDER, DEFAULT_FOLDER))
+        """Liest alle relevanten Paket-E-Mails (SEEN + UNSEEN) der letzten 30 Tage."""
+        server = str(self.entry_data[CONF_IMAP_SERVER]).strip()
+        port = int(self.entry_data[CONF_IMAP_PORT])
+        ssl = bool(self.entry_data[CONF_IMAP_SSL])
+        user_email = str(self.entry_data[CONF_EMAIL]).strip()
+        password = str(self.entry_data[CONF_PASSWORD]).strip().replace(" ", "")
+        folder = str(self.options.get(CONF_FOLDER, self.entry_data.get(CONF_FOLDER, DEFAULT_FOLDER))).strip() or DEFAULT_FOLDER
 
         client = aioimaplib.IMAP4_SSL(host=server, port=port) if ssl else aioimaplib.IMAP4(host=server, port=port)
         await client.wait_hello_from_server()
@@ -130,33 +159,55 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if login_res.result != "OK":
                 raise UpdateFailed("IMAP-Anmeldung fehlgeschlagen")
 
-            await client.select(folder)
-            # Suche nach ungelesenen Nachrichten
-            search_res = await client.search("UNSEEN UNDELETED")
+            select_res = await client.select(folder)
+            if select_res.result != "OK":
+                select_res = await client.select("INBOX")
+            if select_res.result != "OK":
+                _LOGGER.error("IMAP-Ordner konnte nicht geöffnet werden")
+                return
+
+            # Suche nach E-Mails der letzten 30 Tage (SEEN + UNSEEN)
+            since_date = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
+            search_res = await client.search(f"SINCE {since_date} UNDELETED")
             if search_res.result != "OK" or not search_res.lines:
                 return
 
-            uids = search_res.lines[0].split()
-            for uid_bytes in uids:
-                uid = uid_bytes.decode("ascii", errors="ignore")
-                fetch_res = await client.fetch(uid, "(RFC822)")
-                if fetch_res.result != "OK":
+            raw_uids = search_res.lines[0]
+            if isinstance(raw_uids, bytes):
+                uid_list = raw_uids.split()
+            else:
+                uid_list = []
+
+            if not uid_list:
+                _LOGGER.debug("Keine E-Mails im Zeitraum gefunden")
+                return
+
+            _LOGGER.debug("IMAP: %d E-Mails gefunden, werden verarbeitet", len(uid_list))
+
+            for uid_bytes in uid_list:
+                uid = uid_bytes.decode("ascii", errors="ignore") if isinstance(uid_bytes, bytes) else str(uid_bytes)
+                try:
+                    fetch_res = await client.fetch(uid, "(RFC822)")
+                    if fetch_res.result != "OK":
+                        continue
+
+                    # RFC822 payload korrekt extrahieren
+                    raw_email_bytes = None
+                    for line in fetch_res.lines:
+                        if isinstance(line, (bytes, bytearray)) and len(line) > 100:
+                            raw_email_bytes = bytes(line)
+                            break
+
+                    if not raw_email_bytes:
+                        continue
+
+                    msg = email.message_from_bytes(raw_email_bytes)
+                    self._parse_email_message(msg)
+
+                except Exception as e:
+                    _LOGGER.debug("Fehler beim Verarbeiten von E-Mail UID %s: %s", uid, e)
                     continue
 
-                raw_email_bytes = None
-                for line in fetch_res.lines:
-                    if isinstance(line, bytes) and b"Received:" in line or b"From:" in line:
-                        raw_email_bytes = line
-                        break
-                    elif isinstance(line, bytearray):
-                        raw_email_bytes = bytes(line)
-                        break
-
-                if not raw_email_bytes:
-                    continue
-
-                msg = email.message_from_bytes(raw_email_bytes)
-                self._parse_email_message(msg)
         finally:
             try:
                 await client.logout()
@@ -167,6 +218,16 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Analysiert Betreff, Absender und Inhalt nach Tracking-Nummern."""
         subject = decode_str(msg.get("Subject", ""))
         sender = decode_str(msg.get("From", "")).lower()
+
+        # E-Mail-Datum ermitteln
+        date_str = msg.get("Date", "")
+        email_date = datetime.now()
+        if date_str:
+            try:
+                from email.utils import parsedate_to_datetime
+                email_date = parsedate_to_datetime(date_str).replace(tzinfo=None)
+            except Exception:
+                pass
 
         body_text = ""
         if msg.is_multipart():
@@ -274,8 +335,16 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         eta_match = re.findall(r"(?:voraussichtlich bis zum|zustelldatum|geplant für|zustellung am)[:\s]*([0-9]{2}\.[0-9]{2}\.?[0-9]*)", full_text)
         eta = eta_match[0] if eta_match else "Unterwegs"
 
-        is_delivered = any(k in full_text for k in ["wurde zugestellt", "erfolgreich zugestellt", "hat ihr paket zugestellt", "paket ist zugestellt"])
-        is_pickup = any(k in full_text for k in ["access point", "abholbereit", "liegt zur abholung", "abholcode"])
+        is_delivered = any(k in full_text for k in [
+            "wurde zugestellt", "erfolgreich zugestellt",
+            "hat ihr paket zugestellt", "paket ist zugestellt",
+            "ihr paket wurde heute zugestellt", "zugestellt worden",
+            "paket zugestellt", "sendung zugestellt",
+        ])
+        is_pickup = any(k in full_text for k in [
+            "access point", "abholbereit", "liegt zur abholung",
+            "abholcode", "packstation", "zur abholung bereit",
+        ])
         is_today = (
             not is_delivered
             and (
@@ -325,7 +394,7 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             sub_desc += f"Bis {eta}" if eta != "Unterwegs" else "Paket unterwegs"
 
-        self._email_parcels[tracking_code] = {
+        parcel = {
             "id": f"{carrier}_{tracking_code}",
             "carrier": carrier,
             "carrierLabel": carrier_label,
@@ -340,6 +409,28 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "isDelivered": is_delivered,
             "url": tracking_url,
         }
+
+        # Paket speichern oder aktualisieren
+        # Bei Update: Datum beibehalten, Status aktualisieren (neueste E-Mail gewinnt)
+        existing = self._email_parcels.get(tracking_code)
+        if existing:
+            first_seen = existing.get("first_seen", email_date)
+            # Neuere E-Mail überschreibt Status (fortschrittlicherer Status gewinnt)
+            existing_progress = existing.get("parcel", {}).get("progress", 0)
+            if progress >= existing_progress:
+                self._email_parcels[tracking_code] = {
+                    "parcel": parcel,
+                    "first_seen": first_seen,
+                    "last_updated": email_date,
+                }
+                _LOGGER.debug("Paket %s aktualisiert: %s", tracking_code, status_text)
+        else:
+            self._email_parcels[tracking_code] = {
+                "parcel": parcel,
+                "first_seen": email_date,
+                "last_updated": email_date,
+            }
+            _LOGGER.debug("Neues Paket gefunden: %s (%s)", tracking_code, carrier_label)
 
     def _combine_all_parcels(self) -> list[dict[str, Any]]:
         """Kombiniert die E-Mail-Pakete mit vorhandenen DHL & Amazon Sensoren."""
@@ -451,12 +542,13 @@ class UnifiedParcelCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "isPickup": is_pickup,
                 "isDelivered": is_delivered,
                 "progress": progress,
-                "url": ap.get("url") or f"https://www.amazon.de/gp/your-account/order-history",
+                "url": ap.get("url") or "https://www.amazon.de/gp/your-account/order-history",
             })
 
-        # 3. E-Mail Pakete (DPD & Hermes) hinzufügen
-        for ep in self._email_parcels.values():
-            normalized.append(ep)
+        # 3. E-Mail Pakete (DPD, Hermes, UPS, FedEx) hinzufügen
+        for entry in self._email_parcels.values():
+            parcel = entry.get("parcel", entry)  # Rückwärtskompatibilität
+            normalized.append(parcel)
 
         # Sortierung: Abholbereit ganz oben, dann höchster Fortschritt, dann alphabetisch
         normalized.sort(
